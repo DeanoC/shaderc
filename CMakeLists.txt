@@ -1,125 +1,53 @@
-cmake_minimum_required(VERSION 2.8.12)
-project(shaderc)
-enable_testing()
+cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
+get_directory_property(hasParent PARENT_DIRECTORY)
+if (NOT hasParent)
+	set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/out_libs)
+	set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/out_bin)
+	set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/out_bin)
+	set(LIB_BASE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/libs/)
+	include(FetchContent)
+	FetchContent_Declare(al2o3 GIT_REPOSITORY https://github.com/DeanoC/al2o3 GIT_TAG master)
+	FetchContent_GetProperties(al2o3)
+	if (NOT al2o3_POPULATED)
+		FetchContent_Populate(al2o3)
+		add_subdirectory(${al2o3_SOURCE_DIR} ${al2o3_BINARY_DIR})
+	endif ()
+endif ()
 
-if ("${CMAKE_BUILD_TYPE}" STREQUAL "")
-  message(STATUS "No build type selected, default to Debug")
-  set(CMAKE_BUILD_TYPE "Debug")
-endif()
+SET_MIN_VERSIONS()
+set(LibName gfx_shaderc)
 
-message(STATUS "Shaderc: build type is \"${CMAKE_BUILD_TYPE}\".")
+project(${LibName})
+set(Interface
+		../shaderc/env.h
+		../shaderc/shaderc.h
+		../shaderc/shaderc.hpp
+		../shaderc/spvc.h
+		../shaderc/spvc.hpp
+		../shaderc/status.h
+		../shaderc/visibility.h
 
-option(SHADERC_ENABLE_SPVC "Enable libshaderc_spvc" OFF)
+		)
+set(Src
+		shaderc.cc
+		shaderc_private.h
+		spvc.cc
+		libshaderc_util/src/args.cc
+		libshaderc_util/src/compiler.cc
+		libshaderc_util/src/file_finder.cc
+		libshaderc_util/src/io.cc
+		libshaderc_util/src/message.cc
+		libshaderc_util/src/resources.cc
+		libshaderc_util/src/shader_stage.cc
+		libshaderc_util/src/spirv_tools_wrapper.cc
+		libshaderc_util/src/version_profile.cc
+        )
 
-option(SHADERC_SKIP_INSTALL "Skip installation" ${SHADERC_SKIP_INSTALL})
-if(NOT ${SHADERC_SKIP_INSTALL})
-  set(SHADERC_ENABLE_INSTALL ON)
-endif()
+set(Deps
+		gfx_glslang
+		gfx_spirvcross
+		gfx_spirvtools
+		)
 
-option(SHADERC_SKIP_TESTS "Skip building tests" ${SHADERC_SKIP_TESTS})
-if(NOT ${SHADERC_SKIP_TESTS})
-  set(SHADERC_ENABLE_TESTS ON)
-endif()
-if(${SHADERC_ENABLE_TESTS})
-  message(STATUS "Configuring Shaderc to build tests.")
-else()
-  message(STATUS "Configuring Shaderc to avoid building tests.")
-endif()
-
-set (CMAKE_CXX_STANDARD 11)
-
-option(SHADERC_ENABLE_NV_EXTENSIONS "Enables support of Nvidia-specific extensions" ON)
-
-include(GNUInstallDirs)
-include(cmake/setup_build.cmake)
-include(cmake/utils.cmake)
-include(CheckCXXCompilerFlag)
-
-# This flag is not supported on Windows and some older version of GCC
-# that our bots use.
-unset(COMPILER_SUPPORTS_FALLTHROUGH_WARNING CACHE)
-check_cxx_compiler_flag(-Wimplicit-fallthrough COMPILER_SUPPORTS_FALLTHROUGH_WARNING)
-if (COMPILER_SUPPORTS_FALLTHROUGH_WARNING)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wimplicit-fallthrough")
-endif()
-
-if(SHADERC_ENABLE_NV_EXTENSIONS)
-    add_definitions(-DNV_EXTENSIONS)
-endif(SHADERC_ENABLE_NV_EXTENSIONS)
-
-find_host_package(PythonInterp 3 REQUIRED)
-
-add_custom_target(check-copyright ALL
-  ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/utils/add_copyright.py
-  --check
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-  COMMENT "Check copyright")
-
-add_custom_target(add-copyright
-  ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/utils/add_copyright.py
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-  COMMENT "Add copyright")
-
-if(MSVC)
-  option(SHADERC_ENABLE_SHARED_CRT
-          "Use the shared CRT instead of the static CRT"
-          ${SHADERC_ENABLE_SHARED_CRT})
-  if (NOT SHADERC_ENABLE_SHARED_CRT)
-    # Link executables statically by replacing /MD with /MT everywhere.
-    foreach(flag_var
-        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-        CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-      if(${flag_var} MATCHES "/MD")
-        string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
-      endif(${flag_var} MATCHES "/MD")
-    endforeach(flag_var)
-  endif(NOT SHADERC_ENABLE_SHARED_CRT)
-endif(MSVC)
-
-# Configure subdirectories.
-# We depend on these for later projects, so they should come first.
-add_subdirectory(third_party)
-
-if(SHADERC_ENABLE_SPVC)
-add_subdirectory(libshaderc_spvc)
-add_subdirectory(spvc)
-endif()
-add_subdirectory(libshaderc_util)
-add_subdirectory(libshaderc)
-add_subdirectory(glslc)
-add_subdirectory(examples)
-
-add_custom_target(build-version
-  ${PYTHON_EXECUTABLE}
-  ${CMAKE_CURRENT_SOURCE_DIR}/utils/update_build_version.py
-  ${shaderc_SOURCE_DIR} ${spirv-tools_SOURCE_DIR} ${glslang_SOURCE_DIR}
-  COMMENT "Update build-version.inc in the Shaderc build directory (if necessary).")
-
-function(define_pkg_config_file NAME LIBS)
-  add_custom_target(${NAME}-pkg-config ALL
-    COMMAND ${CMAKE_COMMAND}
-      -DCHANGES_FILE=${CMAKE_CURRENT_SOURCE_DIR}/CHANGES
-      -DTEMPLATE_FILE=${CMAKE_CURRENT_SOURCE_DIR}/cmake/${NAME}.pc.in
-      -DOUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/${NAME}.pc
-      -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
-      -DCMAKE_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}
-      -DCMAKE_INSTALL_INCLUDEDIR=${CMAKE_INSTALL_INCLUDEDIR}
-      -DLIBS=${LIBS}
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/write_pkg_config.cmake
-  DEPENDS "CHANGES" "cmake/${NAME}.pc.in" "cmake/write_pkg_config.cmake")
-
-  if (SHADERC_ENABLE_INSTALL)
-    install(
-      FILES
-        ${CMAKE_CURRENT_BINARY_DIR}/${NAME}.pc
-      DESTINATION
-        ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
-  endif()
-endfunction()
-
-if(SHADERC_ENABLE_SPVC)
-  set(EXTRA_STATIC_PKGCONFIG_LIBS -lshaderc_spvc)
-endif()
-define_pkg_config_file(shaderc -lshaderc_shared)
-define_pkg_config_file(shaderc_static "-lshaderc ${EXTRA_STATIC_PKGCONFIG_LIBS} -lshaderc_util")
-define_pkg_config_file(shaderc_combined -lshaderc_combined)
+ADD_LIB(${LibName} "${Interface}" "${Src}" "${Deps}")
+target_include_directories(${LibName} PRIVATE src/libshaderc_util/include)
