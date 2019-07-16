@@ -15,6 +15,11 @@
 #ifndef SHADERC_SHADERC_H_
 #define SHADERC_SHADERC_H_
 
+#ifndef NV_EXTENSIONS
+#define NV_EXTENSIONS 1
+#endif
+
+
 #ifdef __cplusplus
 extern "C" {
 #endif
